@@ -78,7 +78,7 @@ def cosine_similarity_matrix(emb_a: np.ndarray, emb_b: np.ndarray) -> np.ndarray
 
 
 def evaluate_benchmark(model: SentenceBERT, benchmark_name: str,
-                        device: str = "cpu", cache_dir: str = "data/cache") -> float:
+                        device: str = "cpu", cache_dir: str = "data/cache", max_samples=None) -> float:
     """
     Evaluate the model on one STS benchmark.
 
@@ -86,6 +86,12 @@ def evaluate_benchmark(model: SentenceBERT, benchmark_name: str,
         spearman_corr: float between -1 and 1 (higher is better)
     """
     sentences1, sentences2, gold_scores = load_benchmark(benchmark_name, cache_dir)
+
+    if max_samples is not None:
+        sentences1 = sentences1[:max_samples]
+        sentences2 = sentences2[:max_samples]
+        gold_scores = gold_scores[:max_samples]
+        print(f"  [LOCAL TEST] Using only {max_samples} eval examples")
 
     # Encode all sentences (in batches to avoid OOM)
     emb1 = model.encode_sentences(list(sentences1), batch_size=64, device=device).numpy()
@@ -102,7 +108,7 @@ def evaluate_benchmark(model: SentenceBERT, benchmark_name: str,
 
 
 def evaluate_all(model: SentenceBERT, device: str = "cpu",
-                 cache_dir: str = "data/cache") -> dict:
+                 cache_dir: str = "data/cache", max_samples=None) -> dict:
     """
     Run evaluation on all 7 benchmarks and print a formatted results table.
 
@@ -116,7 +122,7 @@ def evaluate_all(model: SentenceBERT, device: str = "cpu",
 
     for benchmark_name in BENCHMARK_MAP:
         print(f"  Evaluating {benchmark_name}...", end="\r")
-        score = evaluate_benchmark(model, benchmark_name, device, cache_dir)
+        score = evaluate_benchmark(model, benchmark_name, device, cache_dir, max_samples)
         results[benchmark_name] = score
         # Multiply by 100 to show as percentage (matches SBERT paper format)
         print(f"{benchmark_name:<20} {score * 100:>11.2f}")
@@ -204,7 +210,8 @@ if __name__ == "__main__":
     model.eval()
 
     # Run the full benchmark evaluation
-    results = evaluate_all(model, device=device, cache_dir=cache_dir)
+    max_samples = config["evaluation"].get("max_eval_samples")
+    results = evaluate_all(model, device=device, cache_dir=cache_dir, max_samples=max_samples)
 
     # Optional: show token weights for a few example sentences
     if args.analyze_weights:
