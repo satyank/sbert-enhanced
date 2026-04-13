@@ -2,7 +2,6 @@
 training/train.py
 -----------------
 Main training script. Handles both baseline and multi-task training.
-Owner: Ayman (baseline) + Satyank (multi-task logic)
 
 Usage examples:
     # Baseline — NLI sequential training with mean pooling
@@ -78,6 +77,11 @@ def build_nli_dataloader(config: dict, tokenizer) -> DataLoader:
     combined = concatenate_datasets([snli, mnli])
     print(f"Total NLI examples: {len(combined)}")
 
+    max_samples = config["training"].get("max_train_samples")
+    if max_samples is not None:
+        combined = combined.select(range(max_samples))
+        print(f"  [LOCAL TEST] Using only {max_samples} NLI examples")
+
     dataset = NLIDataset(
         premises=combined["premise"],
         hypotheses=combined["hypothesis"],
@@ -107,6 +111,11 @@ def build_sts_dataloader(config: dict, tokenizer) -> DataLoader:
 
     print("Loading STS-B...")
     stsb = load_dataset("stsb_multi_mt", name="en", split="train", cache_dir=cache_dir)
+
+    max_samples = config["training"].get("max_train_samples")
+    if max_samples is not None:
+        stsb = stsb.select(range(min(max_samples, len(stsb))))
+        print(f"  [LOCAL TEST] Using only {max_samples} STS examples")
 
     dataset = STSDataset(
         sentences1=stsb["sentence1"],

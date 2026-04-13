@@ -2,7 +2,6 @@
 training/losses.py
 ------------------
 The three loss functions used to train SBERT (as described in the original paper).
-Owner: Ayman
 
 Quick summary of what each loss does:
   NLIClassificationLoss : "Do these sentences entail, contradict, or are neutral?"

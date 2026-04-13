@@ -2,7 +2,6 @@
 models/pooling.py
 -----------------
 Pooling strategies that compress BERT's token-level outputs into one sentence vector.
-Owner: Ege
 
 Think of it like summarizing a paragraph into one sentence:
   - Mean pooling:     average every word equally

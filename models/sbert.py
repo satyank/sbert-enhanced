@@ -2,7 +2,6 @@
 models/sbert.py
 ---------------
 The core Sentence-BERT model.
-Owner: Ayman
 
 Architecture (siamese = "twin"):
     Sentence A ──► BERT ──► Pooling ──► vector_a ──►
