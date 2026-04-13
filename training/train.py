@@ -17,7 +17,10 @@ Usage examples:
     python training/train.py --config configs/config.yaml --multitask --pooling weighted
 """
 
+import sys
 import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import argparse
 import random
 from functools import partial
@@ -69,9 +72,6 @@ def build_nli_dataloader(config: dict, tokenizer) -> DataLoader:
     print("Loading MultiNLI...")
     mnli = load_dataset("multi_nli", split="train", cache_dir=cache_dir)
     mnli = mnli.filter(lambda x: x["label"] != -1)
-    # Rename columns so both datasets have the same field names
-    mnli = mnli.rename_column("premise", "premise")
-    mnli = mnli.rename_column("hypothesis", "hypothesis")
 
     # Combine into one big dataset
     combined = concatenate_datasets([snli, mnli])

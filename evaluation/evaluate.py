@@ -11,6 +11,9 @@ Usage:
     python evaluation/evaluate.py --model_path experiments/pool-mean_best.pt
     python evaluation/evaluate.py --model_path experiments/pool-weighted_best.pt --pooling weighted
 """
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import argparse
 import yaml
