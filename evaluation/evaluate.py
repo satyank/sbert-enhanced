@@ -2,7 +2,6 @@
 evaluation/evaluate.py
 ----------------------
 Evaluates a trained SBERT model on all 7 STS benchmarks.
-Owner: Satyank
 
 The metric is Spearman correlation — it measures how well the ranking
 of predicted similarity scores matches the ranking of gold scores.

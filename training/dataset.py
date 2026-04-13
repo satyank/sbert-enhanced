@@ -2,7 +2,6 @@
 training/dataset.py
 -------------------
 PyTorch Dataset classes for NLI and STS training data.
-Owner: Ayman
 
 PyTorch DataLoaders need a Dataset object that implements:
     __len__()      -> how many examples total

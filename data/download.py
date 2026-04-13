@@ -2,7 +2,6 @@
 data/download.py
 ----------------
 Downloads and caches all datasets needed for training and evaluation.
-Owner: Satyank
 
 Run once before training:
     python data/download.py
