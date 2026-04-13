@@ -1,0 +1,31 @@
+# Python cache files
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+venv/
+env/
+.env/
+
+# Data & checkpoints (too large for git — stored in OneDrive instead)
+data/raw/
+data/cache/
+experiments/checkpoints/
+*.pt
+*.bin
+*.safetensors
+
+# Logs
+*.log
+wandb/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
