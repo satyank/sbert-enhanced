@@ -6,12 +6,12 @@ model:
 training:
   batch_size: 32
   learning_rate: 0.00002            # Standard fine-tuning LR for BERT
-  epochs: 1                         # Will change to 4 when running on full dataset
+  epochs: 4                         # Will change to 4 when running on full dataset
   warmup_steps: 10000               # Linearly ramp up LR for first 10k steps
   seed: 26                          # Fixed seed — keeps all runs reproducible
   max_seq_length: 128
   save_dir: "experiments/"
-  max_train_samples: 100            # Wil change to null when running on full dataset
+  max_train_samples: null            # Wil change to null when running on full dataset
 
   multitask:
     enabled: false
@@ -30,7 +30,7 @@ evaluation:
     - "STSBenchmark"
     - "SICK-R"
   metric: "spearman"
-  max_eval_samples: 100             # Will set to null when evaluating full datasets
+  max_eval_samples: null             # Will set to null when evaluating full datasets
 
 data:
   nli_datasets:
