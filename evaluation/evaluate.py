@@ -301,16 +301,31 @@ if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     cache_dir = config["data"]["cache_dir"]
     max_samples = config["evaluation"].get("max_eval_samples")
+    save_dir = config["training"]["save_dir"]  # ← read save_dir from config
 
     if args.compare:
-        # ── Side by side comparison of all 4 model variants ──────────────
-        # Update these paths to match your actual checkpoint filenames
         compare_models(
             model_configs=[
-                {"name": "Baseline",         "path": "experiments/baseline_mean_best.pt",    "pooling": "mean"},
-                {"name": "Multi-task",        "path": "experiments/multitask_lam0.5_best.pt", "pooling": "mean"},
-                {"name": "Weighted pooling",  "path": "experiments/weighted_pooling_best.pt", "pooling": "weighted"},
-                {"name": "Both",             "path": "experiments/both_enhancements_best.pt", "pooling": "weighted"},
+                {
+                    "name": "Baseline",
+                    "path": os.path.join(save_dir, "baseline_mean_best.pt"),
+                    "pooling": "mean"
+                },
+                {
+                    "name": "Multi-task",
+                    "path": os.path.join(save_dir, "multitask_lam0.5_best.pt"),
+                    "pooling": "mean"
+                },
+                {
+                    "name": "Weighted pooling",
+                    "path": os.path.join(save_dir, "weighted_pooling_best.pt"),
+                    "pooling": "weighted"
+                },
+                {
+                    "name": "Both",
+                    "path": os.path.join(save_dir, "both_enhancements_best.pt"),
+                    "pooling": "weighted"
+                },
             ],
             device=device,
             cache_dir=cache_dir,
@@ -318,13 +333,17 @@ if __name__ == "__main__":
         )
 
     elif args.model_path:
-        # ── Single model evaluation (existing behavior) ───────────────────
-        print(f"Loading model from: {args.model_path}")
+        # Resolve model path — if just a filename, look in save_dir
+        # If full path already given, use as is
+        model_path = args.model_path if os.path.isabs(args.model_path) \
+                     else os.path.join(save_dir, args.model_path)
+
+        print(f"Loading model from: {model_path}")
         model = SentenceBERT(
             model_name=config["model"]["base_model"],
             pooling_strategy=args.pooling,
         )
-        model.load_state_dict(torch.load(args.model_path, map_location=device))
+        model.load_state_dict(torch.load(model_path, map_location=device))
         model.to(device)
         model.eval()
 
