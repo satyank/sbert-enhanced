@@ -1,24 +1,23 @@
 model:
-  base_model: "bert-base-uncased"   # Pre-trained BERT from HuggingFace
-  pooling_strategy: "mean"          # Options: mean | max | cls | weighted
-  hidden_size: 768                  # BERT-base hidden dimension (do not change)
+  base_model: "bert-base-uncased"
+  pooling_strategy: "mean"
+  hidden_size: 768
 
 training:
-  batch_size: 32
-  learning_rate: 0.00002            # Standard fine-tuning LR for BERT
-  epochs: 4                         # Will change to 4 when running on full dataset
-  warmup_steps: 10000               # Linearly ramp up LR for first 10k steps
-  seed: 26                          # Fixed seed — keeps all runs reproducible
+  batch_size: 64
+  learning_rate: 0.00002
+  epochs: 4
+  warmup_steps: 10000
+  seed: 26
   max_seq_length: 128
-  save_dir: "experiments/"
-  max_train_samples: null            # Wil change to null when running on full dataset
-
+  save_dir: "/content/drive/MyDrive/sbert-experiments/"
+  max_train_samples: null
+  save_best_only: false
   multitask:
     enabled: false
-    lambda_weight: 0.5              # 0.5 = equal NLI and STS weight
+    lambda_weight: 0.5
     lambda_values_to_try: [0.1, 0.3, 0.5, 0.7, 0.9]
-
-  triplet_margin: 1.0               # Margin for triplet loss (from original paper)
+  triplet_margin: 1.0
 
 evaluation:
   benchmarks:
@@ -30,7 +29,7 @@ evaluation:
     - "STSBenchmark"
     - "SICK-R"
   metric: "spearman"
-  max_eval_samples: null             # Will set to null when evaluating full datasets
+  max_eval_samples: null
 
 data:
   nli_datasets:
