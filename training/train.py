@@ -197,23 +197,29 @@ def train_epoch_multitask(model, nli_loader, sts_loader, optimizer, scheduler,
                            nli_loss_fn, sts_loss_fn, lambda_weight: float, device) -> float:
     """
     Enhancement 1: Joint multi-task training.
-    Alternates between NLI and STS batches in the same loop.
+    Cycles through STS data repeatedly so NLI sets the pace.
     Combined loss = lambda_weight * nli_loss + (1 - lambda_weight) * sts_loss
     """
     model.train()
     total_loss = 0.0
     steps = 0
 
-    paired_loader = zip(nli_loader, sts_loader)
-    num_steps = min(len(nli_loader), len(sts_loader))
-    progress = tqdm(paired_loader, desc="Training (Multi-task)", total=num_steps, leave=False)
+    # cycle() makes STS loop forever so it never runs out
+    # NLI loader (14,720 batches) sets the total number of steps
+    from itertools import cycle
+    sts_cycled = cycle(sts_loader)
 
-    for nli_batch, sts_batch in progress:
-        # Move entire batches to device
+    num_steps = len(nli_loader)   # ← 14,720 not 90
+    progress = tqdm(enumerate(nli_loader), desc="Training (Multi-task)",
+                    total=num_steps, leave=False)
+
+    for step, nli_batch in progress:
+        sts_batch = next(sts_cycled)  # ← cycles through STS repeatedly
+
+        # Move to device
         nli_batch = move_batch_to_device(nli_batch, device)
         sts_batch = move_batch_to_device(sts_batch, device)
 
-        # Explicitly move sentence dicts to device
         nli_sent_a = {k: v.to(device) for k, v in nli_batch["sentence_a"].items()}
         nli_sent_b = {k: v.to(device) for k, v in nli_batch["sentence_b"].items()}
         sts_sent_a = {k: v.to(device) for k, v in sts_batch["sentence_a"].items()}
@@ -227,7 +233,7 @@ def train_epoch_multitask(model, nli_loader, sts_loader, optimizer, scheduler,
         emb_a_sts, emb_b_sts = model(sts_sent_a, sts_sent_b)
         sts_loss = sts_loss_fn(emb_a_sts, emb_b_sts, sts_batch["scores"])
 
-        # Combine losses with lambda weighting
+        # Combined loss with lambda weighting
         combined_loss = lambda_weight * nli_loss + (1 - lambda_weight) * sts_loss
 
         # Backward pass
