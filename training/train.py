@@ -145,7 +145,9 @@ def move_batch_to_device(batch: dict, device: torch.device) -> dict:
     for key, value in batch.items():
         if isinstance(value, dict):
             # sentence_a and sentence_b are nested dicts of tensors
-            result[key] = {k: v.to(device) for k, v in value.items()}
+            # explicitly check each value is a tensor before moving
+            result[key] = {k: v.to(device) if isinstance(v, torch.Tensor) else v
+                          for k, v in value.items()}
         elif isinstance(value, torch.Tensor):
             result[key] = value.to(device)
         else:
@@ -162,24 +164,28 @@ def train_epoch_sequential(model, nli_loader, optimizer, scheduler,
     model.train()
     total_loss = 0.0
 
-    # tqdm wraps the loader and shows a live progress bar
     progress = tqdm(nli_loader, desc="Training (NLI)", leave=False)
 
     for batch in progress:
+        # Move entire batch to device
         batch = move_batch_to_device(batch, device)
 
-        # Forward pass through both sentences
-        emb_a, emb_b = model(batch["sentence_a"], batch["sentence_b"])
+        # Explicitly move sentence dicts to device
+        sentence_a = {k: v.to(device) for k, v in batch["sentence_a"].items()}
+        sentence_b = {k: v.to(device) for k, v in batch["sentence_b"].items()}
+
+        # Forward pass using explicitly moved tensors
+        emb_a, emb_b = model(sentence_a, sentence_b)
 
         # Compute NLI classification loss
         loss = nli_loss_fn(emb_a, emb_b, batch["labels"])
 
         # Backward pass
-        optimizer.zero_grad()   # clear old gradients
-        loss.backward()         # compute new gradients
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)  # prevent exploding gradients
-        optimizer.step()        # update weights
-        scheduler.step()        # update learning rate
+        optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        optimizer.step()
+        scheduler.step()
 
         total_loss += loss.item()
         progress.set_postfix({"loss": f"{loss.item():.4f}"})
@@ -191,41 +197,40 @@ def train_epoch_multitask(model, nli_loader, sts_loader, optimizer, scheduler,
                            nli_loss_fn, sts_loss_fn, lambda_weight: float, device) -> float:
     """
     Enhancement 1: Joint multi-task training.
-
-    Alternates between NLI and STS batches every step.
-    Combined loss = lambda * nli_loss + (1 - lambda) * sts_loss
-
-    Example with lambda=0.5:
-        step 1: NLI batch  -> loss = 0.5 * nli_loss + 0.5 * sts_loss
-        step 2: STS batch  -> same combined loss formula
-        step 3: NLI batch  -> ...
+    Alternates between NLI and STS batches in the same loop.
+    Combined loss = lambda_weight * nli_loss + (1 - lambda_weight) * sts_loss
     """
     model.train()
     total_loss = 0.0
     steps = 0
 
-    # zip_longest stops when the longer loader runs out
-    # We use the shorter one to avoid running out-of-sync
     paired_loader = zip(nli_loader, sts_loader)
     num_steps = min(len(nli_loader), len(sts_loader))
     progress = tqdm(paired_loader, desc="Training (Multi-task)", total=num_steps, leave=False)
 
     for nli_batch, sts_batch in progress:
+        # Move entire batches to device
         nli_batch = move_batch_to_device(nli_batch, device)
         sts_batch = move_batch_to_device(sts_batch, device)
 
+        # Explicitly move sentence dicts to device
+        nli_sent_a = {k: v.to(device) for k, v in nli_batch["sentence_a"].items()}
+        nli_sent_b = {k: v.to(device) for k, v in nli_batch["sentence_b"].items()}
+        sts_sent_a = {k: v.to(device) for k, v in sts_batch["sentence_a"].items()}
+        sts_sent_b = {k: v.to(device) for k, v in sts_batch["sentence_b"].items()}
+
         # NLI forward pass
-        emb_a_nli, emb_b_nli = model(nli_batch["sentence_a"], nli_batch["sentence_b"])
+        emb_a_nli, emb_b_nli = model(nli_sent_a, nli_sent_b)
         nli_loss = nli_loss_fn(emb_a_nli, emb_b_nli, nli_batch["labels"])
 
         # STS forward pass
-        emb_a_sts, emb_b_sts = model(sts_batch["sentence_a"], sts_batch["sentence_b"])
+        emb_a_sts, emb_b_sts = model(sts_sent_a, sts_sent_b)
         sts_loss = sts_loss_fn(emb_a_sts, emb_b_sts, sts_batch["scores"])
 
-        # Combine both losses with the lambda weighting
-        # lambda=0.7 means we care more about NLI than STS
+        # Combine losses with lambda weighting
         combined_loss = lambda_weight * nli_loss + (1 - lambda_weight) * sts_loss
 
+        # Backward pass
         optimizer.zero_grad()
         combined_loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
