@@ -182,16 +182,117 @@ def analyze_token_weights(model: SentenceBERT, sentences: list,
             bar = "█" * int(w * 200)
             print(f"{tok:<20} {w:>8.4f}  {bar}")
 
+def compare_models(model_configs: list, device: str = "cpu",
+                   cache_dir: str = "data/cache", max_samples: int = None) -> None:
+    """
+    Load multiple trained models and print a side-by-side comparison table.
+
+    Args:
+        model_configs: list of dicts, each with 'name', 'path', and 'pooling'
+        device:        'cuda' or 'cpu'
+        cache_dir:     where datasets are cached
+        max_samples:   limit eval examples (for local testing)
+
+    Example:
+        compare_models([
+            {"name": "Baseline",          "path": "experiments/baseline_best.pt",  "pooling": "mean"},
+            {"name": "Multi-task",         "path": "experiments/multitask_best.pt", "pooling": "mean"},
+            {"name": "Weighted pooling",   "path": "experiments/weighted_best.pt",  "pooling": "weighted"},
+            {"name": "Both enhancements",  "path": "experiments/both_best.pt",      "pooling": "weighted"},
+        ])
+    """
+    import yaml
+
+    with open("configs/config.yaml", "r") as f:
+        config = yaml.safe_load(f)
+
+    # Collect results for every model
+    all_results = {}
+
+    for model_config in model_configs:
+        name     = model_config["name"]
+        path     = model_config["path"]
+        pooling  = model_config["pooling"]
+
+        print(f"\nEvaluating: {name}")
+        print(f"  Loading from: {path}")
+
+        # Load the model
+        model = SentenceBERT(
+            model_name=config["model"]["base_model"],
+            pooling_strategy=pooling,
+        )
+        model.load_state_dict(torch.load(path, map_location=device))
+        model.to(device)
+        model.eval()
+
+        # Run evaluation on all benchmarks
+        results = {}
+        for benchmark_name in BENCHMARK_MAP:
+            score = evaluate_benchmark(model, benchmark_name, device,
+                                       cache_dir, max_samples)
+            results[benchmark_name] = score
+            print(f"  {benchmark_name:<20} {score * 100:.2f}")
+
+        all_results[name] = results
+
+        # Free GPU memory before loading next model
+        del model
+        torch.cuda.empty_cache() if torch.cuda.is_available() else None
+
+    # ── Print comparison table ────────────────────────────────────────────
+    benchmarks = list(BENCHMARK_MAP.keys())
+    model_names = list(all_results.keys())
+    col_width = 16
+
+    print("\n")
+    print("=" * (22 + col_width * len(model_names)))
+    print("RESULTS COMPARISON (Spearman x 100)")
+    print("=" * (22 + col_width * len(model_names)))
+
+    # Header row — model names
+    header = f"{'Benchmark':<22}"
+    for name in model_names:
+        # Truncate long names so table stays aligned
+        header += f"{name[:col_width-1]:<{col_width}}"
+    print(header)
+    print("-" * (22 + col_width * len(model_names)))
+
+    # One row per benchmark
+    for benchmark in benchmarks:
+        row = f"{benchmark:<22}"
+        scores = [all_results[name][benchmark] * 100 for name in model_names]
+        best_score = max(scores)
+        for score in scores:
+            cell = f"{score:.2f}"
+            # Mark the best score in each row with an asterisk
+            if score == best_score:
+                cell += "*"
+            row += f"{cell:<{col_width}}"
+        print(row)
+
+    # Average row
+    print("-" * (22 + col_width * len(model_names)))
+    avg_row = f"{'Average':<22}"
+    avgs = []
+    for name in model_names:
+        avg = np.mean(list(all_results[name].values())) * 100
+        avgs.append(avg)
+        avg_row += f"{avg:.2f}{'*' if avg == max(avgs) else '':<{col_width - 5}}"
+    print(avg_row)
+    print("=" * (22 + col_width * len(model_names)))
+    print("* = best score in that row")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate a trained SBERT model")
-    parser.add_argument("--model_path", type=str, required=True,
-                        help="Path to saved model checkpoint (.pt file)")
+    parser.add_argument("--model_path", type=str, default=None,
+                        help="Path to a single model checkpoint for solo evaluation")
     parser.add_argument("--config", type=str, default="configs/config.yaml")
     parser.add_argument("--pooling", type=str, default="mean",
                         choices=["mean", "max", "cls", "weighted"])
-    parser.add_argument("--analyze_weights", action="store_true",
-                        help="Print token attention weights (only for --pooling weighted)")
+    parser.add_argument("--analyze_weights", action="store_true")
+    parser.add_argument("--compare", action="store_true",
+                        help="Compare all saved models side by side")
     args = parser.parse_args()
 
     with open(args.config, "r") as f:
@@ -199,25 +300,44 @@ if __name__ == "__main__":
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     cache_dir = config["data"]["cache_dir"]
-
-    print(f"Loading model from: {args.model_path}")
-    model = SentenceBERT(
-        model_name=config["model"]["base_model"],
-        pooling_strategy=args.pooling,
-    )
-    model.load_state_dict(torch.load(args.model_path, map_location=device))
-    model.to(device)
-    model.eval()
-
-    # Run the full benchmark evaluation
     max_samples = config["evaluation"].get("max_eval_samples")
-    results = evaluate_all(model, device=device, cache_dir=cache_dir, max_samples=max_samples)
 
-    # Optional: show token weights for a few example sentences
-    if args.analyze_weights:
-        example_sentences = [
-            "The dog ran quickly through the park.",
-            "A cat sat quietly on the windowsill.",
-            "The financial markets experienced significant volatility.",
-        ]
-        analyze_token_weights(model, example_sentences, device)
+    if args.compare:
+        # ── Side by side comparison of all 4 model variants ──────────────
+        # Update these paths to match your actual checkpoint filenames
+        compare_models(
+            model_configs=[
+                {"name": "Baseline",         "path": "experiments/baseline_mean_best.pt",    "pooling": "mean"},
+                {"name": "Multi-task",        "path": "experiments/multitask_lam0.5_best.pt", "pooling": "mean"},
+                {"name": "Weighted pooling",  "path": "experiments/weighted_pooling_best.pt", "pooling": "weighted"},
+                {"name": "Both",             "path": "experiments/both_enhancements_best.pt", "pooling": "weighted"},
+            ],
+            device=device,
+            cache_dir=cache_dir,
+            max_samples=max_samples,
+        )
+
+    elif args.model_path:
+        # ── Single model evaluation (existing behavior) ───────────────────
+        print(f"Loading model from: {args.model_path}")
+        model = SentenceBERT(
+            model_name=config["model"]["base_model"],
+            pooling_strategy=args.pooling,
+        )
+        model.load_state_dict(torch.load(args.model_path, map_location=device))
+        model.to(device)
+        model.eval()
+
+        results = evaluate_all(model, device=device, cache_dir=cache_dir,
+                               max_samples=max_samples)
+
+        if args.analyze_weights:
+            example_sentences = [
+                "The dog ran quickly through the park.",
+                "A cat sat quietly on the windowsill.",
+                "The financial markets experienced significant volatility.",
+            ]
+            analyze_token_weights(model, example_sentences, device)
+
+    else:
+        print("Please provide either --model_path for single evaluation or --compare for side by side comparison.")
