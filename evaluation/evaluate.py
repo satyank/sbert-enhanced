@@ -378,6 +378,7 @@ def error_analysis(baseline_path: str, enhanced_path: str,
     baseline_wins = 0
 
     for rank, idx in enumerate(top_indices, 1):
+        idx = int(idx)
         # Which model was closer to gold?
         base_error = abs(pred_base[idx] - gold_norm[idx])
         enh_error  = abs(pred_enh[idx]  - gold_norm[idx])
