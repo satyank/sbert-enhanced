@@ -315,17 +315,24 @@ if __name__ == "__main__":
     save_dir = config["training"]["save_dir"]  # ← read save_dir from config
 
     if args.compare:
+        save_dir = config["training"]["save_dir"]
+
         compare_models(
             model_configs=[
                 {
-                    "name": "Baseline",
+                    "name": "Baseline (mean)",
                     "path": os.path.join(save_dir, "baseline_mean_best.pt"),
                     "pooling": "mean"
                 },
                 {
-                    "name": "Multi-task",
-                    "path": os.path.join(save_dir, "multitask_lam0.5_best.pt"),
-                    "pooling": "mean"
+                    "name": "Max pooling",
+                    "path": os.path.join(save_dir, "max_pooling_best.pt"),
+                    "pooling": "max"
+                },
+                {
+                    "name": "CLS pooling",
+                    "path": os.path.join(save_dir, "cls_pooling_best.pt"),
+                    "pooling": "cls"
                 },
                 {
                     "name": "Weighted pooling",
@@ -333,7 +340,12 @@ if __name__ == "__main__":
                     "pooling": "weighted"
                 },
                 {
-                    "name": "Both",
+                    "name": "Multitask (mean)",
+                    "path": os.path.join(save_dir, "multitask_lam0.5_best.pt"),
+                    "pooling": "mean"
+                },
+                {
+                    "name": "Both enhancements",
                     "path": os.path.join(save_dir, "both_enhancements_best.pt"),
                     "pooling": "weighted"
                 },
@@ -342,7 +354,6 @@ if __name__ == "__main__":
             cache_dir=cache_dir,
             max_samples=max_samples,
         )
-
     elif args.model_path:
         # Resolve model path — if just a filename, look in save_dir
         # If full path already given, use as is
