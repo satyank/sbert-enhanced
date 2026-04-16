@@ -243,7 +243,7 @@ def compare_models(model_configs: list, device: str = "cpu",
     # ── Print comparison table ────────────────────────────────────────────
     benchmarks = list(BENCHMARK_MAP.keys())
     model_names = list(all_results.keys())
-    col_width = 16
+    col_width = 20
 
     print("\n")
     print("=" * (22 + col_width * len(model_names)))
@@ -253,8 +253,7 @@ def compare_models(model_configs: list, device: str = "cpu",
     # Header row — model names
     header = f"{'Benchmark':<22}"
     for name in model_names:
-        # Truncate long names so table stays aligned
-        header += f"{name[:col_width-1]:<{col_width}}"
+        header += f"{name:<{col_width}}"
     print(header)
     print("-" * (22 + col_width * len(model_names)))
 
@@ -294,6 +293,116 @@ def compare_models(model_configs: list, device: str = "cpu",
     print("=" * (22 + col_width * len(model_names)))
     print("* = best score in that row")
 
+def error_analysis(baseline_path: str, enhanced_path: str,
+                   benchmark_name: str, config: dict,
+                   device: str = "cpu", n_examples: int = 10) -> None:
+    """
+    Find sentence pairs where multitask and baseline disagree most.
+    Shows where joint training helped or hurt.
+
+    Args:
+        baseline_path:  path to baseline_mean_best.pt
+        enhanced_path:  path to multitask_lam0.5_best.pt
+        benchmark_name: which benchmark to analyze e.g. "STSBenchmark"
+        config:         loaded config dict
+        device:         cuda or cpu
+        n_examples:     how many disagreements to show
+    """
+    cache_dir = config["data"]["cache_dir"]
+
+    print(f"\nError Analysis — {benchmark_name}")
+    print(f"Comparing baseline vs multitask")
+    print("=" * 80)
+
+    # Load baseline model
+    print("Loading baseline model...")
+    model_baseline = SentenceBERT(
+        model_name=config["model"]["base_model"],
+        pooling_strategy="mean"
+    )
+    model_baseline.load_state_dict(
+        torch.load(baseline_path, map_location=device)
+    )
+    model_baseline.to(device)
+    model_baseline.eval()
+
+    # Load enhanced model
+    print("Loading multitask model...")
+    model_enhanced = SentenceBERT(
+        model_name=config["model"]["base_model"],
+        pooling_strategy="mean"
+    )
+    model_enhanced.load_state_dict(
+        torch.load(enhanced_path, map_location=device)
+    )
+    model_enhanced.to(device)
+    model_enhanced.eval()
+
+    # Load benchmark data
+    sentences1, sentences2, gold_scores = load_benchmark(
+        benchmark_name, cache_dir
+    )
+
+    # Get embeddings from both models
+    print("Computing embeddings...")
+    emb1_base = model_baseline.encode_sentences(
+        list(sentences1), batch_size=64, device=device
+    ).numpy()
+    emb2_base = model_baseline.encode_sentences(
+        list(sentences2), batch_size=64, device=device
+    ).numpy()
+
+    emb1_enh = model_enhanced.encode_sentences(
+        list(sentences1), batch_size=64, device=device
+    ).numpy()
+    emb2_enh = model_enhanced.encode_sentences(
+        list(sentences2), batch_size=64, device=device
+    ).numpy()
+
+    # Compute cosine similarities
+    pred_base = cosine_similarity_matrix(emb1_base, emb2_base)
+    pred_enh = cosine_similarity_matrix(emb1_enh, emb2_enh)
+
+    # Normalize gold scores to 0-1
+    gold = np.array(gold_scores)
+    gold_norm = (gold - gold.min()) / (gold.max() - gold.min() + 1e-9)
+
+    # Find pairs where models disagree most
+    disagreement = np.abs(pred_base - pred_enh)
+    top_indices = np.argsort(disagreement)[-n_examples:][::-1]
+
+    print(f"\nTop {n_examples} sentence pairs where models disagree:")
+    print("=" * 80)
+
+    enhanced_wins = 0
+    baseline_wins = 0
+
+    for rank, idx in enumerate(top_indices, 1):
+        # Which model was closer to gold?
+        base_error = abs(pred_base[idx] - gold_norm[idx])
+        enh_error  = abs(pred_enh[idx]  - gold_norm[idx])
+        winner = "Multitask ✅" if enh_error < base_error else "Baseline ✅"
+
+        if enh_error < base_error:
+            enhanced_wins += 1
+        else:
+            baseline_wins += 1
+
+        print(f"\nExample {rank}:")
+        print(f"  Sentence 1:        {sentences1[idx]}")
+        print(f"  Sentence 2:        {sentences2[idx]}")
+        print(f"  Gold score:        {gold_scores[idx]:.2f}")
+        print(f"  Baseline pred:     {pred_base[idx]:.4f}")
+        print(f"  Multitask pred:    {pred_enh[idx]:.4f}")
+        print(f"  Disagreement:      {disagreement[idx]:.4f}")
+        print(f"  Closer to gold:    {winner}")
+        print("-" * 80)
+
+    print(f"\nSummary:")
+    print(f"  Multitask closer to gold:  {enhanced_wins}/{n_examples}")
+    print(f"  Baseline closer to gold:   {baseline_wins}/{n_examples}")
+    print(f"  Multitask win rate:        {enhanced_wins/n_examples*100:.0f}%")
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate a trained SBERT model")
     parser.add_argument("--model_path", type=str, default=None,
@@ -301,9 +410,12 @@ if __name__ == "__main__":
     parser.add_argument("--config", type=str, default="configs/config.yaml")
     parser.add_argument("--pooling", type=str, default="mean",
                         choices=["mean", "max", "cls", "weighted"])
-    parser.add_argument("--analyze_weights", action="store_true")
+    parser.add_argument("--analyze_weights", action="store_true",
+                        help="Print token attention weights (only for weighted pooling)")
     parser.add_argument("--compare", action="store_true",
                         help="Compare all saved models side by side")
+    parser.add_argument("--error_analysis", action="store_true",
+                        help="Run error analysis between baseline and multitask")
     args = parser.parse_args()
 
     with open(args.config, "r") as f:
@@ -312,15 +424,14 @@ if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     cache_dir = config["data"]["cache_dir"]
     max_samples = config["evaluation"].get("max_eval_samples")
-    save_dir = config["training"]["save_dir"]  # ← read save_dir from config
+    save_dir = config["training"]["save_dir"]
 
     if args.compare:
-        save_dir = config["training"]["save_dir"]
-
+        # ── Side by side comparison of all models ─────────────────────────
         compare_models(
             model_configs=[
                 {
-                    "name": "Baseline (mean)",
+                    "name": "Baseline (Mean)",
                     "path": os.path.join(save_dir, "baseline_mean_best.pt"),
                     "pooling": "mean"
                 },
@@ -335,17 +446,17 @@ if __name__ == "__main__":
                     "pooling": "cls"
                 },
                 {
-                    "name": "Weighted pooling",
+                    "name": "Weighted pooling (E1)",
                     "path": os.path.join(save_dir, "weighted_pooling_best.pt"),
                     "pooling": "weighted"
                 },
                 {
-                    "name": "Multitask (mean)",
+                    "name": "Multitask (E2)",
                     "path": os.path.join(save_dir, "multitask_lam0.5_best.pt"),
                     "pooling": "mean"
                 },
                 {
-                    "name": "Both enhancements",
+                    "name": "Both enhancements (E1 + E2)",
                     "path": os.path.join(save_dir, "both_enhancements_best.pt"),
                     "pooling": "weighted"
                 },
@@ -354,11 +465,32 @@ if __name__ == "__main__":
             cache_dir=cache_dir,
             max_samples=max_samples,
         )
+
+    elif args.error_analysis:
+        # ── Error analysis between baseline and multitask ─────────────────
+        error_analysis(
+            baseline_path=os.path.join(save_dir, "baseline_mean_best.pt"),
+            enhanced_path=os.path.join(save_dir, "multitask_lam0.5_best.pt"),
+            benchmark_name="STSBenchmark",
+            config=config,
+            device=device,
+            n_examples=10,
+        )
+
     elif args.model_path:
-        # Resolve model path — if just a filename, look in save_dir
-        # If full path already given, use as is
-        model_path = args.model_path if os.path.isabs(args.model_path) \
-                     else os.path.join(save_dir, args.model_path)
+        # ── Single model evaluation ───────────────────────────────────────
+        # Resolve model path — if just filename, look in save_dir
+        if os.path.isabs(args.model_path) or os.path.exists(args.model_path):
+            model_path = args.model_path
+        else:
+            model_path = os.path.join(save_dir, args.model_path)
+
+        if not os.path.exists(model_path):
+            print(f"Error: checkpoint not found at {model_path}")
+            print(f"Files in {save_dir}:")
+            for f in sorted(os.listdir(save_dir)):
+                print(f"  {f}")
+            exit(1)
 
         print(f"Loading model from: {model_path}")
         model = SentenceBERT(
@@ -377,8 +509,18 @@ if __name__ == "__main__":
                 "The dog ran quickly through the park.",
                 "A cat sat quietly on the windowsill.",
                 "The financial markets experienced significant volatility.",
+                "Scientists discovered a new species of bird in the Amazon.",
+                "The children played happily in the garden.",
             ]
             analyze_token_weights(model, example_sentences, device)
 
     else:
-        print("Please provide either --model_path for single evaluation or --compare for side by side comparison.")
+        print("Please provide one of:")
+        print("  --model_path  for single model evaluation")
+        print("  --compare     for side by side comparison")
+        print("  --error_analysis  for baseline vs multitask analysis")
+        print("\nAvailable checkpoints:")
+        if os.path.exists(save_dir):
+            for f in sorted(os.listdir(save_dir)):
+                if f.endswith("_best.pt"):
+                    print(f"  {f}")
