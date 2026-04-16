@@ -257,24 +257,24 @@ def train_epoch_multitask(model, nli_loader, sts_loader, optimizer, scheduler,
 # ── Main training function ───────────────────────────────────────────────────
 
 def train(config: dict, multitask: bool = False, lambda_weight: float = 0.5,
-          pooling_strategy: str = "mean", run_name: str = "sbert") -> SentenceBERT:
+          pooling_strategy: str = "mean", run_name: str = "sbert",
+          resume_from: str = None) -> SentenceBERT:
     """
     Full training pipeline. Returns the trained model.
 
-    Args:
-        config:           loaded config.yaml as a dict
-        multitask:        True = Enhancement 1 (joint training)
-        lambda_weight:    weight for NLI loss in multi-task (0.0 to 1.0)
-        pooling_strategy: 'mean' | 'max' | 'cls' | 'weighted'
-        run_name:         name shown in W&B dashboard
+    Two phases for baseline and weighted pooling (matching original SBERT paper):
+      Phase 1: NLI classification training (4 epochs)
+      Phase 2: STS regression fine-tuning  (1 epoch, lower LR)
+
+    For multitask training:
+      Single phase: NLI + STS mixed together every step (4 epochs)
     """
     set_seed(config["training"]["seed"])
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"\nDevice: {device}")
     print(f"Run: {run_name} | Pooling: {pooling_strategy} | Multi-task: {multitask}\n")
 
-    # Initialize Weights & Biases logging
-    # This tracks all your metrics in a dashboard at wandb.ai
+    # Initialize W&B logging
     wandb.init(
         project="sbert-reproduction",
         name=run_name,
@@ -293,21 +293,23 @@ def train(config: dict, multitask: bool = False, lambda_weight: float = 0.5,
     ).to(device)
 
     # Build data loaders
+    # Both NLI and STS are always loaded
+    # NLI: main training data for all models
+    # STS: used for multitask training AND phase 2 fine-tuning
     nli_loader = build_nli_dataloader(config, model.tokenizer)
-    sts_loader = build_sts_dataloader(config, model.tokenizer) if multitask else None
+    sts_loader = build_sts_dataloader(config, model.tokenizer)
 
-    # Optimizer — AdamW is standard for fine-tuning BERT
+    # Optimizer
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=config["training"]["learning_rate"],
         eps=1e-8,
     )
 
-    # Total steps across all epochs (for scheduler)
+    # Total steps for scheduler
     total_steps = len(nli_loader) * config["training"]["epochs"]
 
-    # Linear warmup: LR ramps from 0 to target over warmup_steps,
-    # then linearly decays back to 0 by the end of training
+    # Linear warmup scheduler
     scheduler = get_linear_schedule_with_warmup(
         optimizer,
         num_warmup_steps=config["training"]["warmup_steps"],
@@ -318,14 +320,28 @@ def train(config: dict, multitask: bool = False, lambda_weight: float = 0.5,
     nli_loss_fn = NLIClassificationLoss(hidden_size=model.hidden_size).to(device)
     sts_loss_fn = STSRegressionLoss().to(device)
 
-    # Make sure the save directory exists
+    # Save directory
     save_dir = config["training"]["save_dir"]
     os.makedirs(save_dir, exist_ok=True)
 
+    # Handle resume from checkpoint
+    start_epoch = 1
     best_loss = float("inf")
+    best_path = os.path.join(save_dir, f"{run_name}_best.pt")
 
-    # ── Training loop ─────────────────────────────────────────────────────
-    for epoch in range(1, config["training"]["epochs"] + 1):
+    if resume_from and os.path.exists(resume_from):
+        print(f"Resuming from checkpoint: {resume_from}")
+        model.load_state_dict(torch.load(resume_from, map_location=device))
+        import re
+        match = re.search(r'epoch(\d+)', resume_from)
+        if match:
+            start_epoch = int(match.group(1)) + 1
+            print(f"Resuming from epoch {start_epoch}")
+
+    # ── Phase 1: NLI Training ──────────────────────────────────────────────
+    print(f"\nPhase 1: NLI Training ({config['training']['epochs']} epochs)")
+
+    for epoch in range(start_epoch, config["training"]["epochs"] + 1):
         print(f"\nEpoch {epoch}/{config['training']['epochs']}")
 
         if multitask:
@@ -341,17 +357,78 @@ def train(config: dict, multitask: bool = False, lambda_weight: float = 0.5,
         print(f"  Epoch {epoch} avg loss: {epoch_loss:.4f}")
         wandb.log({"epoch": epoch, "train_loss": epoch_loss})
 
-        # Save a checkpoint after every epoch
-        # This means if training crashes, you only lose one epoch at most
+        # Save checkpoint after every epoch
         ckpt_path = os.path.join(save_dir, f"{run_name}_epoch{epoch}.pt")
         torch.save(model.state_dict(), ckpt_path)
         print(f"  Checkpoint saved: {ckpt_path}")
 
-        # Also track the best model separately
+        # Track best model
         if epoch_loss < best_loss:
             best_loss = epoch_loss
-            best_path = os.path.join(save_dir, f"{run_name}_best.pt")
             torch.save(model.state_dict(), best_path)
+
+    # ── Phase 2: STS Fine-tuning ───────────────────────────────────────────
+    # Only for non-multitask models (baseline_mean and weighted_pooling)
+    # Multitask already trains on STS simultaneously so skip it
+    # This matches the original SBERT paper's two-phase training approach
+    if not multitask:
+        print("\nPhase 2: STS Fine-tuning (matching original SBERT paper)")
+
+        # Lower learning rate for fine-tuning
+        # Use 1/5 of original LR to make small gentle adjustments
+        # to weights already trained in Phase 1
+        finetune_lr = config["training"]["learning_rate"] / 5
+        for param_group in optimizer.param_groups:
+            param_group["lr"] = finetune_lr
+        print(f"  Fine-tuning LR: {finetune_lr}")
+
+        # Fresh scheduler for fine-tuning phase
+        sts_total_steps = len(sts_loader)  # 1 epoch of STS
+        sts_scheduler = get_linear_schedule_with_warmup(
+            optimizer,
+            num_warmup_steps=100,
+            num_training_steps=sts_total_steps,
+        )
+
+        # Fine-tune for 1 epoch on STS data
+        model.train()
+        total_sts_loss = 0.0
+        steps = 0
+
+        progress = tqdm(sts_loader, desc="STS Fine-tuning", leave=False)
+
+        for batch in progress:
+            batch = move_batch_to_device(batch, device)
+
+            # Move sentence dicts explicitly to device
+            sent_a = {k: v.to(device) for k, v in batch["sentence_a"].items()}
+            sent_b = {k: v.to(device) for k, v in batch["sentence_b"].items()}
+
+            # Forward pass
+            emb_a, emb_b = model(sent_a, sent_b)
+
+            # STS regression loss
+            loss = sts_loss_fn(emb_a, emb_b, batch["scores"])
+
+            # Backward pass
+            optimizer.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
+            sts_scheduler.step()
+
+            total_sts_loss += loss.item()
+            steps += 1
+            progress.set_postfix({"sts_loss": f"{loss.item():.4f}"})
+
+        avg_sts_loss = total_sts_loss / max(steps, 1)
+        print(f"  STS fine-tuning complete. Avg loss: {avg_sts_loss:.4f}")
+        wandb.log({"sts_finetune_loss": avg_sts_loss})
+
+        # Save final model after STS fine-tuning
+        # This overwrites best_path with the fine-tuned version
+        torch.save(model.state_dict(), best_path)
+        print(f"  Fine-tuned model saved: {best_path}")
 
     wandb.finish()
     print(f"\nTraining complete. Best model saved to: {best_path}")
