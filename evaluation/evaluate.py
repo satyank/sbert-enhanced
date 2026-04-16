@@ -273,12 +273,23 @@ def compare_models(model_configs: list, device: str = "cpu",
 
     # Average row
     print("-" * (22 + col_width * len(model_names)))
-    avg_row = f"{'Average':<22}"
-    avgs = []
+
+    # Calculate ALL averages first before printing
+    # This fixes the double asterisk bug where max(avgs)
+    # was being checked against a growing list
+    avgs = {}
     for name in model_names:
-        avg = np.mean(list(all_results[name].values())) * 100
-        avgs.append(avg)
-        avg_row += f"{avg:.2f}{'*' if avg == max(avgs) else '':<{col_width - 5}}"
+        avgs[name] = np.mean(list(all_results[name].values())) * 100
+
+    # Find the single best average across all models
+    best_avg = max(avgs.values())
+
+    # Now print with correct single asterisk
+    avg_row = f"{'Average':<22}"
+    for name in model_names:
+        avg = avgs[name]
+        marker = "*" if avg == best_avg else ""
+        avg_row += f"{avg:.2f}{marker:<{col_width - 5}}"
     print(avg_row)
     print("=" * (22 + col_width * len(model_names)))
     print("* = best score in that row")
