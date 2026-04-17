@@ -331,7 +331,7 @@ if __name__ == "__main__":
     elif args.error_analysis:
         error_analysis(
             baseline_path=os.path.join(save_dir, "baseline_mean_best.pt"),
-            enhanced_path=os.path.join(save_dir, "multitask_lam0.5_best.pt"),
+            multitask_path=os.path.join(save_dir, "multitask_lam0.5_best.pt"),
             benchmark_name="STSBenchmark",
             config=config,
             device=device,
