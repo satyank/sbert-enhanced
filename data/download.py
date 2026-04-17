@@ -8,43 +8,43 @@ from datasets import load_dataset
 # - premise: first sentence
 # - hypothesis: second sentence
 # - label: can be one of the four integer values (-1 = invalid, 0 = entailment, 1 = neutral, 2 = contradiction)
-def download_nli_datasets(cache_dir: str = "data/cache") -> None:
+def download_nli_datasets(cache_dir: str = "data/cache"):
     os.makedirs(cache_dir, exist_ok=True)
 
     print("Downloading SNLI (~550k training examples)...")
     snli = load_dataset("snli", cache_dir=cache_dir)
-    print(f"  Train: {len(snli['train'])} | Val: {len(snli['validation'])} | Test: {len(snli['test'])}")
+    print(f"\tTrain: {len(snli['train'])} | Val: {len(snli['validation'])} | Test: {len(snli['test'])}")
 
     sample = snli["train"][0]
-    print(f"  Sample — premise: '{sample['premise']}' | hypothesis: '{sample['hypothesis']}' | label: {sample['label']}")
+    print(f"\tSample — premise: '{sample['premise']}' | hypothesis: '{sample['hypothesis']}' | label: {sample['label']}")
 
     print("\nDownloading MultiNLI (~393k training examples)...")
     mnli = load_dataset("multi_nli", cache_dir=cache_dir)
-    print(f"  Train: {len(mnli['train'])} | Val matched: {len(mnli['validation_matched'])}")
+    print(f"\tTrain: {len(mnli['train'])} | Val matched: {len(mnli['validation_matched'])}")
 
     sample = mnli["train"][0]
-    print(f"  Sample — premise: '{sample['premise']}' | label: {sample['label']}")
+    print(f"\tSample — premise: '{sample['premise']}' | label: {sample['label']}")
 
 # this function downloads the STS-B dataset
 # sample contains:
 # - sentence1, sentence2: the sentence pair
 # - similarity_score:     float from 0.0 (unrelated) to 5.0 (identical)
 # during training we normalize scores to [0, 1] by dividing by 5.
-def download_sts_dataset(cache_dir: str = "data/cache") -> None:
+def download_sts_dataset(cache_dir: str = "data/cache"):
     os.makedirs(cache_dir, exist_ok=True)
 
     print("\nDownloading STS-B...")
     stsb = load_dataset("stsb_multi_mt", name="en", cache_dir=cache_dir)
-    print(f"  Train: {len(stsb['train'])} | Val: {len(stsb['dev'])} | Test: {len(stsb['test'])}")
+    print(f"\tTrain: {len(stsb['train'])} | Val: {len(stsb['dev'])} | Test: {len(stsb['test'])}")
 
     sample = stsb["train"][0]
-    print(f"  Sample — s1: '{sample['sentence1']}' | s2: '{sample['sentence2']}' | score: {sample['similarity_score']}")
+    print(f"\tSample — s1: '{sample['sentence1']}' | s2: '{sample['sentence2']}' | score: {sample['similarity_score']}")
 
 # this function downloads the 7 STS evaluation datasets used in SBERT paper
 # STS12, STS13, STS14, STS15, STS16, STSBenchmark, SICK-R
-def download_eval_benchmarks(cache_dir: str = "data/cache") -> None:
+def download_eval_benchmarks(cache_dir: str = "data/cache"):
     os.makedirs(cache_dir, exist_ok=True)
-    benchmark_map = {
+    sts_datasets = {
         "STS12": ("mteb/sts12-sts", "test"),
         "STS13": ("mteb/sts13-sts", "test"),
         "STS14": ("mteb/sts14-sts", "test"),
@@ -55,12 +55,12 @@ def download_eval_benchmarks(cache_dir: str = "data/cache") -> None:
     }
 
     print("\nDownloading evaluation benchmarks...")
-    for name, (dataset_id, split) in benchmark_map.items():
+    for name, (dataset_id, split) in sts_datasets.items():
         try:
             ds = load_dataset(dataset_id, split=split, cache_dir=cache_dir)
-            print(f"  {name}: {len(ds)} examples")
+            print(f"\t{name}: {len(ds)} examples")
         except Exception as e:
-            print(f"  {name}: failed to download — {e}")
+            print(f"\t{name}: failed to download — {e}")
 
 
 if __name__ == "__main__":
