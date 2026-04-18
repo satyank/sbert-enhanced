@@ -309,12 +309,12 @@ if __name__ == "__main__":
                     "pooling": "cls"
                 },
                 {
-                    "name": "Weighted pooling (E1)",
+                    "name": "Weighted pooling (E2)",
                     "path": os.path.join(save_dir, "weighted_pooling_best.pt"),
                     "pooling": "weighted"
                 },
                 {
-                    "name": "Multitask (E2)",
+                    "name": "Multitask (E1)",
                     "path": os.path.join(save_dir, "multitask_lam0.5_best.pt"),
                     "pooling": "mean"
                 },
