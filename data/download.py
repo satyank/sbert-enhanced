@@ -7,7 +7,8 @@ from datasets import load_dataset
 # Sample:
 # - premise: first sentence
 # - hypothesis: second sentence
-# - label: can be one of the four integer values (-1 = invalid, 0 = entailment, 1 = neutral, 2 = contradiction)
+# - label: can be one of the three integer values (0 = entailment, 1 = neutral, 2 = contradiction)
+# we assign a value of -1 for inavlid labels
 def download_nli_datasets(cache_dir: str = "data/cache"):
     os.makedirs(cache_dir, exist_ok=True)
 
