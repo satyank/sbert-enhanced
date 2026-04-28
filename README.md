@@ -1,157 +1,192 @@
-# Sentence-BERT: Reproduction & Enhancements
+# Reproducing Sentence-BERT with Two Training Enhancements
 
-**CS NLP Project** — The University of Texas at Dallas  
-Ayman Shehzad Awal · Ege Berk Konya · Satyank Nadimpalli
+## Requirements
+
+Python 3.8 or higher is required. Install all dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+### `requirements.txt`
+
+```
+torch>=2.0.0
+transformers>=4.35.0
+datasets>=2.14.0
+scipy>=1.11.0
+numpy>=1.24.0
+tqdm>=4.65.0
+scikit-learn>=1.3.0
+pandas>=2.0.0
+matplotlib>=3.7.0
+pyyaml>=6.0
+wandb>=0.16.0
+```
 
 ---
 
-## Overview
+## Google Colab Setup
 
-Reproduces [Sentence-BERT (Reimers & Gurevych, 2019)](https://arxiv.org/abs/1908.10084) and adds two enhancements:
+This project was trained on Google Colab with an A100 GPU. Before running, mount Google Drive and clone the repository:
 
-1. **Joint Multi-Task Training** (Enhancement 1) — train NLI and STS simultaneously
-2. **Learned Weighted Pooling** (Enhancement 2) — replace mean pooling with trainable attention
+```python
+from google.colab import drive
+import os
+
+drive.mount('/content/drive')
+os.makedirs('/content/drive/MyDrive/sbert-experiments', exist_ok=True)
+```
+
+Clone and navigate to the project:
+
+```bash
+git clone <your-repo-url>
+cd sbert-enhanced
+```
+
+Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Log in to Weights & Biases for experiment tracking:
+
+```python
+import wandb
+wandb.login()
+```
+
+Verify GPU:
+
+```python
+import torch
+print("GPU available:", torch.cuda.is_available())
+print("GPU name:", torch.cuda.get_device_name(0))
+```
+
+---
+
+## Configuration
+
+All hyperparameters are in `configs/config.yaml`. Update `save_dir` to your Google Drive path before training:
+
+```yaml
+training:
+  batch_size: 64
+  learning_rate: 0.00002
+  epochs: 4
+  warmup_steps: 10000
+  seed: 26
+  max_seq_length: 128
+  save_dir: "/content/drive/MyDrive/sbert-experiments/"
+  max_train_samples: null   # set to a small number for local testing
+  multitask:
+    enabled: false
+    lambda_weight: 0.5
+```
+
+For a quick local test set `max_train_samples: 10` and `batch_size: 2`.
+
+---
+
+## Data Download
+
+Download all training and evaluation datasets:
+
+```bash
+python data/download.py
+```
+
+This downloads SNLI, MultiNLI, STS-B, and all seven evaluation benchmarks into `data/cache/`.
+
+---
+
+## Training
+
+### Run all six models:
+
+```bash
+# Baseline — mean pooling, sequential training
+python training/train.py --config configs/config.yaml --run_name baseline_mean
+
+# Max pooling
+python training/train.py --config configs/config.yaml --pooling max --run_name max_pooling
+
+# CLS pooling
+python training/train.py --config configs/config.yaml --pooling cls --run_name cls_pooling
+
+# Enhancement 2 — learned weighted pooling
+python training/train.py --config configs/config.yaml --pooling weighted --run_name weighted_pooling
+
+# Enhancement 1 — joint multi-task training
+python training/train.py --config configs/config.yaml --multitask --lambda_weight 0.5 --run_name multitask_lam0.5
+
+# Both enhancements combined
+python training/train.py --config configs/config.yaml --pooling weighted --multitask --lambda_weight 0.5 --run_name both_enhancements
+```
+
+### Arguments
+
+| Argument | Description |
+|---|---|
+| `--config` | Path to config file (default: `configs/config.yaml`) |
+| `--pooling` | Pooling strategy: `mean`, `max`, `cls`, `weighted` (default: `mean`) |
+| `--multitask` | Enable joint multi-task training (Enhancement 1) |
+| `--lambda_weight` | Balance between NLI and STS losses for multitask (default: `0.5`) |
+| `--run_name` | Name for W&B run and saved model file |
+
+---
+
+## Evaluation
+
+### Evaluate a single model:
+
+```bash
+python evaluation/evaluate.py --model_path baseline_mean_best.pt --pooling mean
+python evaluation/evaluate.py --model_path multitask_lam0.5_best.pt --pooling mean
+python evaluation/evaluate.py --model_path weighted_pooling_best.pt --pooling weighted
+python evaluation/evaluate.py --model_path both_enhancements_best.pt --pooling weighted
+python evaluation/evaluate.py --model_path max_pooling_best.pt --pooling max
+python evaluation/evaluate.py --model_path cls_pooling_best.pt --pooling cls
+```
+
+### Compare all six models:
+
+```bash
+python evaluation/evaluate.py --compare
+```
+
+### Additional analysis:
+
+```bash
+# Token weight analysis (weighted pooling models only)
+python evaluation/evaluate.py --model_path weighted_pooling_best.pt --pooling weighted --analyze_weights
+
+# Error analysis
+python evaluation/evaluate.py --error_analysis
+```
 
 ---
 
 ## Project Structure
 
 ```
-sbert-project/
-├── configs/config.yaml          ← all hyperparameters in one place
-├── data/download.py             ← download all datasets (run once)
+sbert-enhanced/
+├── configs/
+│   └── config.yaml          # All hyperparameters
+├── data/
+│   └── download.py          # Downloads all datasets
 ├── models/
-│   ├── sbert.py                 ← siamese BERT model
-│   └── pooling.py               ← mean / max / cls / weighted pooling
+│   ├── sbert.py             # SentenceBERT — siamese architecture
+│   └── pooling.py           # Mean / Max / CLS / Weighted pooling
 ├── training/
-│   ├── dataset.py               ← PyTorch Dataset classes
-│   ├── losses.py                ← NLI, STS regression, triplet losses
-│   └── train.py                 ← main training script
-├── evaluation/evaluate.py       ← Spearman eval on 7 benchmarks
-├── experiments/                 ← checkpoints saved here (gitignored)
-├── run_experiments.sh           ← runs all 4 variants end-to-end
-└── requirements.txt
+│   ├── dataset.py           # NLIDataset, STSDataset, collate functions
+│   ├── losses.py            # NLIClassificationLoss, STSRegressionLoss
+│   └── train.py             # Training pipeline — sequential and multitask
+├── evaluation/
+│   └── evaluate.py          # Spearman evaluation, model comparison, error analysis
+├── requirements.txt
+└── README.md
 ```
-
----
-
-## Azure Setup (Step-by-Step)
-
-### Step 1 — Activate your Azure student account
-1. Go to [azure.microsoft.com/en-us/free/students](https://azure.microsoft.com/en-us/free/students)
-2. Sign in with your **UTD email** (@utdallas.edu)
-3. Follow the prompts — you'll get $100 free credits, no credit card needed
-
-### Step 2 — Create a GPU Virtual Machine
-1. In the Azure portal, click **Create a resource → Virtual Machine**
-2. Choose these settings:
-   - **Region**: East US (usually has T4 availability)
-   - **Image**: Ubuntu 22.04 LTS
-   - **Size**: `Standard_NC4as_T4_v3` (1× T4 GPU, ~$0.53/hr)
-   - **Authentication**: SSH public key (generate one or use an existing key)
-3. Click **Review + Create → Create**
-4. Once deployed, copy the **Public IP address** from the VM overview page
-
-### Step 3 — Connect to your VM
-```bash
-# From your laptop terminal (Mac/Linux)
-ssh azureuser@YOUR_VM_PUBLIC_IP
-
-# On Windows, use PowerShell or install Windows Terminal
-```
-
-### Step 4 — Set up the environment on the VM
-```bash
-# Install system dependencies
-sudo apt-get update
-sudo apt-get install -y python3-pip git
-
-# Clone your GitHub repo
-git clone https://github.com/YOUR_USERNAME/sbert-project.git
-cd sbert-project
-
-# Install Python packages
-pip3 install -r requirements.txt
-
-# Verify GPU is detected — should show your T4
-python3 -c "import torch; print(torch.cuda.get_device_name(0))"
-```
-
-### Step 5 — Download datasets
-```bash
-# This downloads ~5GB of data — do it once and it caches automatically
-python3 data/download.py
-```
-
-### Step 6 — Log into Weights & Biases
-```bash
-wandb login
-# Paste your API key from wandb.ai/authorize
-# Now all training runs will appear in your W&B dashboard automatically
-```
-
-### Step 7 — Run training
-```bash
-# Option A: Run all experiments automatically (recommended — leave overnight)
-chmod +x run_experiments.sh
-nohup ./run_experiments.sh > training.log 2>&1 &
-# 'nohup' keeps it running even if your SSH connection drops
-# Check progress: tail -f training.log
-
-# Option B: Run one experiment manually
-python3 training/train.py --config configs/config.yaml --pooling mean
-python3 training/train.py --config configs/config.yaml --pooling weighted
-python3 training/train.py --config configs/config.yaml --multitask --lambda_weight 0.5
-```
-
-### Step 8 — Evaluate
-```bash
-python3 evaluation/evaluate.py \
-    --model_path experiments/baseline_mean_best.pt \
-    --pooling mean
-
-# For weighted pooling — also shows token weights (great for the demo!)
-python3 evaluation/evaluate.py \
-    --model_path experiments/weighted_pooling_best.pt \
-    --pooling weighted \
-    --analyze_weights
-```
-
-### Step 9 — IMPORTANT: Stop your VM when done
-```bash
-# In the Azure portal: go to your VM → click Stop
-# Or from the terminal:
-az vm deallocate --resource-group YOUR_RG --name YOUR_VM_NAME
-```
-> ⚠️ A running VM costs money even if you're not using it. Always stop it!
-
----
-
-## Running All 4 Experiments
-
-| Command | Description |
-|---|---|
-| `python training/train.py --pooling mean` | Baseline (mean pooling) |
-| `python training/train.py --pooling mean --multitask --lambda_weight 0.5` | Enhancement 1 |
-| `python training/train.py --pooling weighted` | Enhancement 2 |
-| `python training/train.py --pooling weighted --multitask --lambda_weight 0.5` | Both |
-
----
-
-## Expected Results Table
-
-| Model | STS12 | STS13 | STS14 | STS15 | STS16 | STS-B | SICK-R | Avg |
-|---|---|---|---|---|---|---|---|---|
-| SBERT (paper) | 70.97 | 76.53 | 73.19 | 79.09 | 74.30 | 76.55 | 72.05 | 74.67 |
-| Ours: mean pooling | | | | | | | | |
-| Ours: + multi-task | | | | | | | | |
-| Ours: + weighted pooling | | | | | | | | |
-| Ours: both | | | | | | | | |
-
----
-
-## References
-
-- Reimers & Gurevych (2019). *Sentence-BERT.* EMNLP.
-- Devlin et al. (2019). *BERT.* NAACL.
-- Yang et al. (2016). *Hierarchical Attention Networks.* NAACL.
